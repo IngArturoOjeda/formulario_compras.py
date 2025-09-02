@@ -133,7 +133,6 @@ class Compras:
         importe = 0
         for fila in self.grilla.get_children():
             valor_celda = self.grilla.item(fila)['values'][4]
-            print('valor celda:', valor_celda)
             valor_celda_limpio = valor_celda.replace(',', '')
             importe += int(valor_celda_limpio)
         self.total_general.set(self.formatear_number(str(importe)))
@@ -187,7 +186,7 @@ class Compras:
                                 prv_cod, com_tipodoc, com_nrodoc, fecins,com_estado, com_total, com_cancelado)
                                 values (?,?,?,?,?,?,?,?)""", (self.txt_fecha_factura.get(), self.txt_codigo.get(),
                                                             tipodoc, self.txt_factura.get(),date.today().strftime('%d/%m/%Y'),'A',
-                                                            self.total_general_numeric, self.total_general_numeric))
+                                                            int(self.total_general_numeric), int(self.total_general_numeric)))
                     
                     resultado = cursor.execute('select @@identity from comprascab').fetchone()
                     id_cabecera = resultado[0]
@@ -197,7 +196,8 @@ class Compras:
                         cod_articulo = valores[6]
                         cantidad = valores[2]
                         precio_uni = valores[3]
-                        precio_uni_num = precio_uni.replace(',', '')
+                        precio_uni_num = float(precio_uni.replace(',', ''))
+                        print(int(precio_uni_num))
                         subtotal = valores[4]
                         porcentaje = valores[7]
                         subtotal_num = subtotal.replace(',', '')
