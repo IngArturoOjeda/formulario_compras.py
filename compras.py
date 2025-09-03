@@ -20,11 +20,12 @@ class Compras:
         self.top.bind_class("Button", "<Return>", lambda event: event.widget.invoke())   
         self.txt_codigo = tk.StringVar()
         self.txt_proveedor = tk.StringVar()
-        self.total_general = tk.StringVar(value='0')
+        self.total_general = tk.StringVar()
         self.txt_factura = tk.StringVar()
         self.opcion = tk.IntVar()
-        self.txt_fecha_factura = tk.StringVar(value=date.today().strftime("%d/%m/%Y"))
+        self.txt_fecha_factura = tk.StringVar()
         self.total_general_numeric = tk.IntVar()
+        
     
         frame_cabecera = tk.Frame(self.top)
         frame_cabecera.pack(fill='x', padx=10, pady=5)
@@ -94,7 +95,9 @@ class Compras:
         self.grilla.column("precio", width=50, anchor="center")
         self.grilla.column("borrar", width=30, anchor="center")
 
-        self.grilla.pack(expand=True, fill="both", pady=10)    
+        self.grilla.pack(expand=True, fill="both", pady=10)   
+
+        self.clean() 
     
         "----------------------marco inferior principal-----------------------"
 
@@ -168,6 +171,15 @@ class Compras:
                 finally:
                     conn.close()                            
         return True
+    
+    def to_float(self, texto: str) -> float:
+            try:
+                # quitar separadores de miles
+                limpio = texto.replace(",", "").strip()
+                return float(limpio) if limpio else 0.0
+            except ValueError:
+                return 0.0      
+            
     def guardar(self):
          if self.valida_factura():
             conn = get_conexion()
@@ -197,24 +209,54 @@ class Compras:
                         cantidad = valores[2]
                         precio_uni = valores[3]
                         precio_uni_num = float(precio_uni.replace(',', ''))
-                        print(int(precio_uni_num))
                         subtotal = valores[4]
                         porcentaje = valores[7]
                         subtotal_num = subtotal.replace(',', '')
+                        precioventa = valores[8]
+                        precioventa_num = float(precioventa.replace(",",""))
                         itmens += 1
                         cursor.execute("""
                         INSERT INTO comprasdet (com_nro, com_item, art_cod, com_cantidad, com_preciouni, com_poriva, com_preciototal)
                         VALUES (?, ?, ?, ?, ?, ?, ?)
                         """, (id_cabecera, itmens, cod_articulo, cantidad, precio_uni_num, porcentaje, subtotal_num)) 
-                
+
+                        query = 'select art_costo, art_preciobase from articulos where art_cod=? '
+                        result = cursor.execute(query, (cod_articulo,)).fetchone()    
+                        if result[0]!=precio_uni_num and result[1]!=precioventa_num:
+                             cursor.execute('update articulos set art_costo = ?, art_preciobase =? where art_cod = ? ', (precio_uni_num, precioventa_num, cod_articulo))
+                        elif result[0]!=precio_uni_num:
+                             cursor.execute('update articulos set art_costo = ? where art_cod = ? ', (precio_uni_num, cod_articulo))
+                        elif result[1]!=precioventa_num:
+                             cursor.execute('update articulos set art_preciobase = ? where art_cod = ? ', (precioventa_num, cod_articulo))
+
+                        query_stock = 'select sto_cantidad from stock where art_cod = ?'
+                        result_stock = cursor.execute(query_stock, (cod_articulo,)).fetchone()
+                        if result_stock and result_stock[0] is not None:
+                            nuevo_stock = float(result_stock[0]) + float(cantidad)
+                            
+                            cursor.execute('update stock set sto_cantidad = ? where art_cod = ?', (nuevo_stock, cod_articulo))
+                        else:
+                            cursor.execute('insert into stock (art_cod, dep_cod, sto_cantidad) values (?, ?, ?)', (cod_articulo, 1, nuevo_stock))
+                                        
                     conn.commit()
                     messagebox.showinfo('Mensaje al Usuario', 'Guardado Correctamente.')
+                    self.clean()
                 except pyodbc.IntegrityError as e:
                             messagebox.showerror("Error de integridad", f"No se pudo abir.\n{e}")
                 except Exception as e:
                             messagebox.showerror("Error", f"Ocurrió un error inesperado:\n{e}")  
                 finally:
-                    conn.close()             
+                    conn.close()    
+
+    def clean(self):
+        for item in self.grilla.get_children():
+            self.grilla.delete(item)
+
+        self.txt_codigo.set("")
+        self.txt_proveedor.set("")
+        self.txt_factura.set("")
+        self.txt_fecha_factura.set(value=date.today().strftime("%d/%m/%Y"))
+        self.total_general.set("0")
                                 
     def ventana_buscar(self):
         top_buscar = tk.Toplevel(self.top)
@@ -347,7 +389,7 @@ class Compras:
                     
                     self.grilla.insert("", tk.END, values=(num_fila, self.text_nombre_prod.get(),
                                     float(self.text_cantidad.get()),self.text_precio_costo.get(), self.text_total.get(),"❌",
-                                    self.text_codprod.get(), var_porcentaje))  
+                                    self.text_codprod.get(), var_porcentaje, self.text_precio_venta.get()))  
                     self.suma_grilla() 
                     top_articulo.destroy()
                               
@@ -401,16 +443,23 @@ class Compras:
                     pass  # si no es número, lo ignora
 
             def validad_cantidad():
-                if self.text_cantidad.get()=='0':
-                      messagebox.showerror(title='Mensaje al Usuario', message='Ingrese Cantidad a comprar')
-                      return False
-                elif self.text_precio_costo.get()=='0':
-                      messagebox.showerror(title='Mensaje al Usuario', message='Ingrese Precio Costo')
-                      return False
-                elif self.text_precio_venta.get()=="0":
-                      messagebox.showerror(title='Mensaje al Usuario', message='Ingrese Precio Venta')
-                      return False
-                return True 
+                cant  = self.to_float(self.text_cantidad.get())
+                costo = self.to_float(self.text_precio_costo.get())
+                venta = self.to_float(self.text_precio_venta.get())
+
+                try:
+                    if cant<=0:  
+                        messagebox.showerror(title='Mensaje al Usuario', message='Ingrese Cantidad a comprar')
+                        return False
+                    elif costo<=0:
+                        messagebox.showerror(title='Mensaje al Usuario', message='Ingrese Precio Costo')
+                        return False
+                    elif venta<=0:
+                        messagebox.showerror(title='Mensaje al Usuario', message='Ingrese Precio Venta')
+                        return False
+                    return True 
+                except ValueError:
+                     messagebox.showerror(title='Mensaje al Usuario', message='Ingrese un valor númerico')
 
             frama_art = tk.Frame(top_articulo, relief='sunken', bd=2)
             frama_art.grid(row=0, column=0, sticky="nsew")
